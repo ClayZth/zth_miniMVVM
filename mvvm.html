@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MVVM</title>
+</head>
+
+<body>
+    <div id="app">
+        <input type="text" v-model="name">
+        <div style="margin: 20p 0;" v-html="name"></div>
+        <button v-html="name" @click="onChangeName"></button>
+    </div>
+</body>
+
+</html>
+<script>
+    class Dep {
+        constructor() {
+            this.listeners = []
+        }
+        add(obj) {
+            this.listeners.push(obj)
+        }
+        notify() {
+            this.listeners.forEach(item => {
+                item.update && item.update()
+            })
+        }
+    }
+    class Watcher {
+        constructor(options) {
+            this.update = options.update
+            Dep.target = this
+            this.val = options.allVal[options.key]
+            Dep.target = null
+        }
+    }
+    class Vue {
+        constructor(options) {
+                this.$options = options;
+                this.$data = options.data();
+                this.observerRoot(); //劫持根实例
+                this.observerData(this.$data); //劫持数据
+                this.createFragment(); //创建虚拟元素，避免频繁操作真实dom
+                this.compile() //编译元素，解析指令，事件，方法
+            }
+            //劫持根实例
+        observerRoot() {
+                Object.keys(this.$data).forEach(item => {
+                    console.log(this, item);
+                    Object.defineProperty(this, item, {
+                        enumerable: true,
+                        configurable: false,
+                        get: () => {
+                            return this.$data[item]
+                        },
+                        set: (newVal) => {
+                            this.$data[item] = newVal
+                        }
+
+                    })
+                })
+            }
+            //劫持数据
+        observerData(obj) {
+                if (!obj || typeof obj != 'object') return
+                Object.keys(obj).forEach(item => {
+                    let val = obj[item]
+                    if (typeof val == 'object') {
+                        this.observerData(val)
+                    } else {
+                        let dep = new Dep()
+                        Object.defineProperty(obj, item, {
+                            enumerable: true,
+                            configurable: false,
+                            get: () => {
+                                Dep.target && dep.add(Dep.target)
+                                return val
+                            },
+                            set: (newVal) => {
+                                val = newVal
+                                dep.notify()
+                            }
+                        })
+                    }
+
+                })
+            }
+            //创建虚拟元素
+        createFragment() {
+            this.$el = document.querySelector(this.$options.el);
+            this.$fragment = document.createDocumentFragment()
+            while (this.$el.firstChild) {
+                this.$fragment.appendChild(this.$el.firstChild)
+            }
+        }
+        compile() {
+            //解析
+            this.compileELement(this.$fragment);
+            //重新append到根元素下面
+            this.$el.appendChild(this.$fragment)
+                //加一些生命周期钩子函数
+        }
+        compileELement(ele) {
+                Array.from(ele.childNodes).forEach(item => {
+                    this.compileNode(item)
+                    if (item.childNodes) {
+                        this.compileELement(item)
+                    }
+                })
+            }
+            //解析节点
+        compileNode(node) {
+            //解析节点包含的指令和事件等
+            let res = this.checkHasBind(node)
+                //处理解析结果
+            this.resolveBind(node, res)
+        }
+        checkHasBind(node) {
+            let attributes = node.attributes
+            let dir_reg = /^v\-\w*$/
+            let event_reg = /^\@\w*/
+            let result = {
+                directives: [],
+                events: []
+            }
+            if (attributes) {
+                Array.from(attributes).forEach(item => {
+                    if (dir_reg.test(item.name)) {
+                        result.directives.push({
+                            name: item.name,
+                            value: item.value
+                        })
+                    }
+                    if (event_reg.test(item.name)) {
+                        result.events.push({
+                            name: item.name,
+                            value: item.value
+                        })
+                    }
+                })
+            }
+            return result
+        }
+        resolveBind(node, res) {
+            let that = this;
+            let data = this.$data;
+            let {
+                directives,
+                events
+            } = res;
+            directives.length && directives.forEach(item => {
+                let update = () => {
+                    switch (item.name) {
+                        case 'v-model':
+                            node.oninput = (val) => {
+                                that[item.value] = node.value || ''
+                            }
+                            node.value = data[item.value]
+                            break;
+                        case 'v-html':
+                            node.innerHTML = data[item.value]
+                            break;
+                        default:
+                            break
+                    }
+                }
+                let watch_option = {
+                    allVal: data,
+                    key: item.value,
+                    directive: item.name,
+                    node: node,
+                    update
+                }
+                new Watcher(watch_option)
+                update()
+            })
+            events.length && events.forEach(item => {
+                let method_name = item.value
+                let target_name = item.name.slice(1, item.name.length)
+                node.addEventListener(target_name, () => {
+                    this.$options.methods[method_name].call(this)
+                })
+            })
+        }
+    }
+</script>
+
+<script>
+    let app = new Vue({
+        el: '#app',
+        data() {
+            return {
+                name: 'zth'
+            }
+        },
+        methods: {
+            onChangeName() {
+                this.name = Math.random()
+            }
+        }
+    })
+</script>
